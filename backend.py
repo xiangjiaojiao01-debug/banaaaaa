@@ -5,9 +5,11 @@ import numpy as np
 from PIL import Image, ImageDraw
 from ultralytics import YOLO
 
-MODEL_PATH = Path(r"C:\Users\user\Desktop\banana_yolo\v17\weights\best.pt")
-SOURCE_DIR = Path(r"C:\Users\user\Desktop\dataset(沒有甜度版)_cropped")
-OUTPUT_DIR = Path(r"C:\Users\user\Desktop\banana_predict_result\backend_v16_all_s_only")
+BASE_DIR = Path(__file__).resolve().parent
+
+MODEL_PATH = BASE_DIR / "weights" / "best.pt"
+SOURCE_DIR = BASE_DIR / "dataset_cropped"
+OUTPUT_DIR = Path("/tmp/banana_predict_result")
 DEFAULT_CONF = 0.20
 S_CONF = 0.20
 DARK_MIN_AREA = 700
