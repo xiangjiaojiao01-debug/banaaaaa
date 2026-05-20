@@ -7,7 +7,7 @@ from ultralytics import YOLO
 
 BASE_DIR = Path(__file__).resolve().parent
 
-MODEL_PATH = BASE_DIR / "weights" / "best.pt"
+MODEL_PATH = BASE_DIR / "best.pt"
 SOURCE_DIR = BASE_DIR / "dataset_cropped"
 OUTPUT_DIR = Path("/tmp/banana_predict_result")
 DEFAULT_CONF = 0.20
