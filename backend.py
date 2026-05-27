@@ -1,10 +1,10 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 from PIL import Image, ImageDraw
 from ultralytics import YOLO
 
 LOCAL_MODEL_PATH = Path(r"C:\Users\user\Desktop\yolo\banana_yolo\v19\weights\best.pt")
-MODEL_PATH = LOCAL_MODEL_PATH if LOCAL_MODEL_PATH.exists() else Path("yolo_best.pt")
+MODEL_PATH = LOCAL_MODEL_PATH if LOCAL_MODEL_PATH.exists() else Path("best.pt")
 SOURCE_DIR = Path(r"C:\Users\user\Desktop\dataset(沒有甜度版)_cropped")
 OUTPUT_DIR = Path(r"C:\Users\user\Desktop\yolo\banana_predict_result")
 DEFAULT_CONF = 0.20
