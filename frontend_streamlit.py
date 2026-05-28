@@ -9,6 +9,7 @@ import streamlit as st
 from backend import CLASS_COLORS, DEFAULT_CONF, MODEL_PATH, predict_and_analyze
 
 DISPLAY_IMAGE_SIZE = (560, 560)
+END_EXCLUDE_RATIO = 0.10
 
 st.set_page_config(
     page_title="Banana Detection",
@@ -28,6 +29,15 @@ html, body, [class*="css"] { font-family: Arial, sans-serif; }
 .det-table { font-size: .9rem; }
 </style>
 """, unsafe_allow_html=True)
+
+
+def is_near_banana_end(x, y, width, height, crop_width, crop_height):
+    if crop_height >= crop_width:
+        center = y + height / 2
+        return center < crop_height * END_EXCLUDE_RATIO or center > crop_height * (1 - END_EXCLUDE_RATIO)
+
+    center = x + width / 2
+    return center < crop_width * END_EXCLUDE_RATIO or center > crop_width * (1 - END_EXCLUDE_RATIO)
 
 
 def draw_color_spot_overlay(canvas: Image.Image, detections):
@@ -67,6 +77,9 @@ def draw_color_spot_overlay(canvas: Image.Image, detections):
             continue
 
         bx, by, bw, bh = cv2.boundingRect(contour)
+        if is_near_banana_end(bx, by, bw, bh, x2 - x1, y2 - y1):
+            continue
+
         rect = [x1 + bx, y1 + by, x1 + bx + bw, y1 + by + bh]
         overlay_draw.rectangle(rect, fill=(255, 145, 0, 46), outline=(255, 145, 0, 230), width=3)
 

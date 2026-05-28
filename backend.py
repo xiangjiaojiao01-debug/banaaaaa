@@ -1,6 +1,8 @@
 from pathlib import Path
 import colorsys
 
+import cv2
+import numpy as np
 from PIL import Image, ImageDraw
 from ultralytics import YOLO
 
@@ -15,6 +17,8 @@ MID_SPOT_MAX = 15.0
 MAX_SPOT_BOX_AREA_RATIO = 0.25
 YELLOW_RATIO_MIN = 0.20
 GREEN_RATIO_MIN = 0.20
+END_EXCLUDE_RATIO = 0.10
+MIN_COLOR_SPOT_AREA_RATIO = 0.00035
 
 model = YOLO(str(MODEL_PATH))
 
@@ -87,6 +91,52 @@ def _union_box_area(boxes):
     return total
 
 
+def _component_is_near_banana_end(x, y, width, height, crop_width, crop_height):
+    if crop_height >= crop_width:
+        center = y + height / 2
+        return center < crop_height * END_EXCLUDE_RATIO or center > crop_height * (1 - END_EXCLUDE_RATIO)
+
+    center = x + width / 2
+    return center < crop_width * END_EXCLUDE_RATIO or center > crop_width * (1 - END_EXCLUDE_RATIO)
+
+
+def _brown_spot_mask(rgb_array):
+    hsv = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2HSV)
+    hue, saturation, value = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+
+    green = (hue > 35) & (hue <= 85) & (saturation >= 51) & (value >= 64)
+    brown = (
+        (((hue >= 5) & (hue <= 28) & (saturation >= 46) & (value >= 31) & (value <= 158))
+        | ((value < 56) & (saturation >= 31)))
+        & ~green
+    )
+
+    mask = (brown.astype(np.uint8) * 255)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    return cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+
+def _body_brown_spot_mask(rgb_array):
+    mask = _brown_spot_mask(rgb_array)
+    crop_height, crop_width = mask.shape
+    min_area = max(25, crop_width * crop_height * MIN_COLOR_SPOT_AREA_RATIO)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    kept_mask = np.zeros_like(mask)
+
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area < min_area:
+            continue
+
+        x, y, width, height = cv2.boundingRect(contour)
+        if _component_is_near_banana_end(x, y, width, height, crop_width, crop_height):
+            continue
+
+        cv2.drawContours(kept_mask, [contour], -1, 255, thickness=cv2.FILLED)
+
+    return kept_mask
+
+
 def analyze_banana_color(image_path, detections):
     all_box = next((d for d in detections if d["label"] == "all"), None)
     if all_box is None:
@@ -94,6 +144,7 @@ def analyze_banana_color(image_path, detections):
             "banana_color": "不明",
             "yellow_ratio": 0.0,
             "green_ratio": 0.0,
+            "color_black_spot_pct": 0.0,
         }
 
     with Image.open(image_path) as image:
@@ -104,17 +155,23 @@ def analyze_banana_color(image_path, detections):
                 "banana_color": "不明",
                 "yellow_ratio": 0.0,
                 "green_ratio": 0.0,
+                "color_black_spot_pct": 0.0,
             }
 
         crop = image.crop(crop_box)
         crop.thumbnail((220, 220))
+        crop_array = np.array(crop.convert("RGB"))
+        body_brown_mask = _body_brown_spot_mask(crop_array)
 
         total = max(1, crop.size[0] * crop.size[1])
         yellow_count = 0
         green_count = 0
-        brown_spot_count = 0
+        brown_spot_count = int(np.count_nonzero(body_brown_mask))
 
-        for red, green, blue in crop.getdata():
+        for index, (red, green, blue) in enumerate(crop.getdata()):
+            if body_brown_mask[index // crop.size[0], index % crop.size[0]]:
+                continue
+
             hue, saturation, value = colorsys.rgb_to_hsv(
                 red / 255,
                 green / 255,
@@ -124,18 +181,8 @@ def analyze_banana_color(image_path, detections):
 
             is_green = 70 < hue_degrees <= 170 and saturation >= 0.20 and value >= 0.25
             is_yellow = 28 <= hue_degrees <= 70 and saturation >= 0.25 and value >= 0.35
-            is_brown_spot = (
-                (
-                    10 <= hue_degrees <= 55
-                    and saturation >= 0.18
-                    and 0.12 <= value <= 0.62
-                )
-                or (value < 0.22 and saturation >= 0.12)
-            ) and not is_green
 
-            if is_brown_spot:
-                brown_spot_count += 1
-            elif is_yellow:
+            if is_yellow:
                 yellow_count += 1
             elif is_green:
                 green_count += 1
