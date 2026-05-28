@@ -11,6 +11,7 @@ DEFAULT_CONF = 0.20
 S_CONF = 0.20
 LOW_SPOT_MAX = 5.0
 MID_SPOT_MAX = 15.0
+MAX_SPOT_BOX_AREA_RATIO = 0.25
 
 model = YOLO(str(MODEL_PATH))
 
@@ -31,6 +32,48 @@ def _inside(inner_box, outer_box):
     return ox1 <= cx <= ox2 and oy1 <= cy <= oy2
 
 
+def _box_area(box):
+    x1, y1, x2, y2 = box
+    return max(0.0, x2 - x1) * max(0.0, y2 - y1)
+
+
+def _clip_box(box, outer_box):
+    x1, y1, x2, y2 = box
+    ox1, oy1, ox2, oy2 = outer_box
+    return [
+        max(x1, ox1),
+        max(y1, oy1),
+        min(x2, ox2),
+        min(y2, oy2),
+    ]
+
+
+def _union_box_area(boxes):
+    x_edges = sorted({x for box in boxes for x in (box[0], box[2])})
+    total = 0.0
+
+    for left, right in zip(x_edges, x_edges[1:]):
+        if right <= left:
+            continue
+
+        intervals = []
+        for x1, y1, x2, y2 in boxes:
+            if x1 <= left and right <= x2 and y2 > y1:
+                intervals.append((y1, y2))
+
+        intervals.sort()
+        merged = []
+        for start, end in intervals:
+            if not merged or start > merged[-1][1]:
+                merged.append([start, end])
+            else:
+                merged[-1][1] = max(merged[-1][1], end)
+
+        total += (right - left) * sum(end - start for start, end in merged)
+
+    return total
+
+
 def filter_yolo_detections(detections):
     all_detections = [d for d in detections if d["label"] == "all"]
     s_detections = [d for d in detections if d["label"] == "s" and d["confidence"] >= S_CONF]
@@ -38,16 +81,22 @@ def filter_yolo_detections(detections):
     if not all_detections:
         return None, s_detections
 
-    best_all = max(all_detections, key=lambda d: d["confidence"])
+    best_all = max(
+        all_detections,
+        key=lambda d: (
+            sum(1 for spot in s_detections if _inside(spot["box"], d["box"])),
+            d["confidence"],
+        ),
+    )
     all_box = best_all["box"]
-    s_detections = [d for d in s_detections if _inside(d["box"], all_box)]
+    banana_area = _box_area(all_box)
+    s_detections = [
+        d for d in s_detections
+        if _inside(d["box"], all_box)
+        and _box_area(_clip_box(d["box"], all_box)) / banana_area <= MAX_SPOT_BOX_AREA_RATIO
+    ]
 
     return best_all, s_detections
-
-
-def _box_area(box):
-    x1, y1, x2, y2 = box
-    return max(0.0, x2 - x1) * max(0.0, y2 - y1)
 
 
 def calculate_black_spot_pct(detections):
@@ -61,8 +110,13 @@ def calculate_black_spot_pct(detections):
     if banana_area <= 0:
         return 0.0
 
-    spot_area = sum(_box_area(d["box"]) for d in s_detections)
-    return round(spot_area / banana_area * 100, 2)
+    spot_boxes = [
+        _clip_box(d["box"], all_box["box"])
+        for d in s_detections
+    ]
+    spot_boxes = [box for box in spot_boxes if _box_area(box) > 0]
+    spot_area = _union_box_area(spot_boxes)
+    return round(min(spot_area / banana_area * 100, 100.0), 2)
 
 
 def classify_yolo_black_spot(black_spot_pct):
