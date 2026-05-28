@@ -1,10 +1,12 @@
 ﻿from pathlib import Path
 import tempfile
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps
 import streamlit as st
 
 from backend import CLASS_COLORS, DEFAULT_CONF, MODEL_PATH, predict_and_analyze
+
+DISPLAY_IMAGE_SIZE = (560, 560)
 
 st.set_page_config(
     page_title="Banana Detection",
@@ -48,6 +50,16 @@ def draw_detections(image: Image.Image, detections):
     return canvas
 
 
+def fit_image_to_display(image: Image.Image):
+    image = image.convert("RGB")
+    resized = ImageOps.contain(image, DISPLAY_IMAGE_SIZE)
+    canvas = Image.new("RGB", DISPLAY_IMAGE_SIZE, "white")
+    x = (DISPLAY_IMAGE_SIZE[0] - resized.width) // 2
+    y = (DISPLAY_IMAGE_SIZE[1] - resized.height) // 2
+    canvas.paste(resized, (x, y))
+    return canvas
+
+
 def save_upload_to_temp(uploaded_file):
     suffix = Path(uploaded_file.name).suffix or ".jpg"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -59,7 +71,7 @@ def run_uploaded_image(uploaded_file, conf):
     image_path = save_upload_to_temp(uploaded_file)
     image = Image.open(image_path)
     detections, analysis = predict_and_analyze(image_path, conf=conf)
-    result_image = draw_detections(image, detections)
+    result_image = fit_image_to_display(draw_detections(image, detections))
     return image, result_image, detections, analysis
 
 
