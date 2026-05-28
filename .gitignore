@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+
+.streamlit/
+.env
+.venv/
+venv/
+
+runs/
+outputs/
+debug/
+black_spot_output/
+
+.DS_Store
+desktop.ini
+Thumbs.db
