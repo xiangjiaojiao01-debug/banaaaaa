@@ -1,6 +1,8 @@
 ﻿from pathlib import Path
 import tempfile
 
+import cv2
+import numpy as np
 from PIL import Image, ImageDraw, ImageOps
 import streamlit as st
 
@@ -28,7 +30,50 @@ html, body, [class*="css"] { font-family: Arial, sans-serif; }
 """, unsafe_allow_html=True)
 
 
-def draw_detections(image: Image.Image, detections):
+def draw_color_spot_overlay(canvas: Image.Image, detections):
+    all_box = next((d for d in detections if d["label"] == "all"), None)
+    if all_box is None:
+        return canvas
+
+    width, height = canvas.size
+    x1, y1, x2, y2 = [int(v) for v in all_box["box"]]
+    x1, x2 = max(0, x1), min(width, x2)
+    y1, y2 = max(0, y1), min(height, y2)
+    if x2 <= x1 or y2 <= y1:
+        return canvas
+
+    crop = np.array(canvas.crop((x1, y1, x2, y2)).convert("RGB"))
+    hsv = cv2.cvtColor(crop, cv2.COLOR_RGB2HSV)
+    hue, saturation, value = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+
+    green = (hue > 35) & (hue <= 85) & (saturation >= 51) & (value >= 64)
+    brown = (
+        (((hue >= 5) & (hue <= 28) & (saturation >= 46) & (value >= 31) & (value <= 158))
+        | ((value < 56) & (saturation >= 31)))
+        & ~green
+    )
+
+    mask = (brown.astype(np.uint8) * 255)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    min_area = max(80, (x2 - x1) * (y2 - y1) * 0.00035)
+
+    for contour in contours:
+        if cv2.contourArea(contour) < min_area:
+            continue
+
+        bx, by, bw, bh = cv2.boundingRect(contour)
+        rect = [x1 + bx, y1 + by, x1 + bx + bw, y1 + by + bh]
+        overlay_draw.rectangle(rect, fill=(255, 145, 0, 46), outline=(255, 145, 0, 230), width=3)
+
+    return Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
+
+
+def draw_detections(image: Image.Image, detections, analysis):
     canvas = image.convert("RGB").copy()
     draw = ImageDraw.Draw(canvas)
 
@@ -46,6 +91,9 @@ def draw_detections(image: Image.Image, detections):
         text_y = max(0, y1 - text_h - 5)
         draw.rectangle([x1, text_y, x1 + text_w + 8, text_y + text_h + 6], fill=color)
         draw.text((x1 + 4, text_y + 3), text, fill="black")
+
+    if analysis.get("color_black_spot_pct", 0.0) > analysis.get("yolo_black_spot_pct", analysis["black_spot_pct"]):
+        canvas = draw_color_spot_overlay(canvas, detections)
 
     return canvas
 
@@ -71,7 +119,7 @@ def run_uploaded_image(uploaded_file, conf):
     image_path = save_upload_to_temp(uploaded_file)
     image = Image.open(image_path)
     detections, analysis = predict_and_analyze(image_path, conf=conf)
-    result_image = fit_image_to_display(draw_detections(image, detections))
+    result_image = fit_image_to_display(draw_detections(image, detections, analysis))
     return image, result_image, detections, analysis
 
 
