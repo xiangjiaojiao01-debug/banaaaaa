@@ -19,6 +19,8 @@ YELLOW_RATIO_MIN = 0.20
 GREEN_RATIO_MIN = 0.20
 END_EXCLUDE_RATIO = 0.10
 MIN_COLOR_SPOT_AREA_RATIO = 0.00035
+MIN_SPOTS_FOR_COLOR_FALLBACK = 5
+MIN_YELLOW_RATIO_FOR_COLOR_FALLBACK = 0.12
 
 model = YOLO(str(MODEL_PATH))
 
@@ -282,6 +284,22 @@ def classify_yolo_black_spot(black_spot_pct, banana_color="不明"):
     }
 
 
+def should_apply_color_fallback(yolo_black_spot_pct, color_info, spot_count):
+    if color_info["color_black_spot_pct"] <= yolo_black_spot_pct:
+        return False
+
+    if color_info["color_black_spot_pct"] < MID_SPOT_MAX:
+        return False
+
+    if spot_count < MIN_SPOTS_FOR_COLOR_FALLBACK:
+        return False
+
+    if color_info["yellow_ratio"] < MIN_YELLOW_RATIO_FOR_COLOR_FALLBACK:
+        return False
+
+    return True
+
+
 def analyze_yolo_result(detections, image_path=None):
     yolo_black_spot_pct = calculate_black_spot_pct(detections)
     s_count = sum(1 for d in detections if d["label"] == "s")
@@ -296,14 +314,21 @@ def analyze_yolo_result(detections, image_path=None):
             "color_black_spot_pct": 0.0,
         }
     )
-    black_spot_pct = max(yolo_black_spot_pct, color_info["color_black_spot_pct"])
+    color_black_spot_pct = (
+        color_info["color_black_spot_pct"]
+        if should_apply_color_fallback(yolo_black_spot_pct, color_info, s_count)
+        else 0.0
+    )
+
+    black_spot_pct = max(yolo_black_spot_pct, color_black_spot_pct)
     result = classify_yolo_black_spot(black_spot_pct, color_info["banana_color"])
-    if color_info["color_black_spot_pct"] > yolo_black_spot_pct:
-        result["standard"] = f"顏色褐斑補償 {color_info['color_black_spot_pct']:.2f}%"
+    if color_black_spot_pct > yolo_black_spot_pct:
+        result["standard"] = f"顏色褐斑補償 {color_black_spot_pct:.2f}%"
 
     result.update({
         "black_spot_pct": black_spot_pct,
         "yolo_black_spot_pct": yolo_black_spot_pct,
+        "applied_color_black_spot_pct": color_black_spot_pct,
         "spot_count": s_count,
         "banana_count": all_count,
         "method": "YOLO",

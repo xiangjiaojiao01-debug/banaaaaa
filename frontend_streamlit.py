@@ -105,7 +105,8 @@ def draw_detections(image: Image.Image, detections, analysis):
         draw.rectangle([x1, text_y, x1 + text_w + 8, text_y + text_h + 6], fill=color)
         draw.text((x1 + 4, text_y + 3), text, fill="black")
 
-    if analysis.get("color_black_spot_pct", 0.0) > analysis.get("yolo_black_spot_pct", analysis["black_spot_pct"]):
+    applied_color_pct = analysis.get("applied_color_black_spot_pct", 0.0)
+    if applied_color_pct > analysis.get("yolo_black_spot_pct", analysis["black_spot_pct"]):
         canvas = draw_color_spot_overlay(canvas, detections)
 
     return canvas
