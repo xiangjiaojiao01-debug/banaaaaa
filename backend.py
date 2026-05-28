@@ -112,6 +112,7 @@ def analyze_banana_color(image_path, detections):
         total = max(1, crop.size[0] * crop.size[1])
         yellow_count = 0
         green_count = 0
+        brown_spot_count = 0
 
         for red, green, blue in crop.getdata():
             hue, saturation, value = colorsys.rgb_to_hsv(
@@ -121,13 +122,28 @@ def analyze_banana_color(image_path, detections):
             )
             hue_degrees = hue * 360
 
-            if 28 <= hue_degrees <= 70 and saturation >= 0.25 and value >= 0.35:
+            is_green = 70 < hue_degrees <= 170 and saturation >= 0.20 and value >= 0.25
+            is_yellow = 28 <= hue_degrees <= 70 and saturation >= 0.25 and value >= 0.35
+            is_brown_spot = (
+                (
+                    10 <= hue_degrees <= 55
+                    and saturation >= 0.18
+                    and 0.12 <= value <= 0.62
+                )
+                or (value < 0.22 and saturation >= 0.12)
+            ) and not is_green
+
+            if is_brown_spot:
+                brown_spot_count += 1
+            elif is_yellow:
                 yellow_count += 1
-            elif 70 < hue_degrees <= 170 and saturation >= 0.20 and value >= 0.25:
+            elif is_green:
                 green_count += 1
 
     yellow_ratio = yellow_count / total
     green_ratio = green_count / total
+    color_spot_base = max(1, yellow_count + brown_spot_count)
+    color_black_spot_pct = brown_spot_count / color_spot_base * 100
 
     if yellow_ratio >= YELLOW_RATIO_MIN:
         banana_color = "偏黃"
@@ -140,6 +156,7 @@ def analyze_banana_color(image_path, detections):
         "banana_color": banana_color,
         "yellow_ratio": round(yellow_ratio, 3),
         "green_ratio": round(green_ratio, 3),
+        "color_black_spot_pct": round(color_black_spot_pct, 2),
     }
 
 
@@ -219,17 +236,27 @@ def classify_yolo_black_spot(black_spot_pct, banana_color="不明"):
 
 
 def analyze_yolo_result(detections, image_path=None):
-    black_spot_pct = calculate_black_spot_pct(detections)
+    yolo_black_spot_pct = calculate_black_spot_pct(detections)
     s_count = sum(1 for d in detections if d["label"] == "s")
     all_count = sum(1 for d in detections if d["label"] == "all")
     color_info = (
         analyze_banana_color(image_path, detections)
         if image_path is not None
-        else {"banana_color": "不明", "yellow_ratio": 0.0, "green_ratio": 0.0}
+        else {
+            "banana_color": "不明",
+            "yellow_ratio": 0.0,
+            "green_ratio": 0.0,
+            "color_black_spot_pct": 0.0,
+        }
     )
+    black_spot_pct = max(yolo_black_spot_pct, color_info["color_black_spot_pct"])
     result = classify_yolo_black_spot(black_spot_pct, color_info["banana_color"])
+    if color_info["color_black_spot_pct"] > yolo_black_spot_pct:
+        result["standard"] = f"顏色褐斑補償 {color_info['color_black_spot_pct']:.2f}%"
+
     result.update({
         "black_spot_pct": black_spot_pct,
+        "yolo_black_spot_pct": yolo_black_spot_pct,
         "spot_count": s_count,
         "banana_count": all_count,
         "method": "YOLO",
