@@ -120,6 +120,7 @@ with right:
             <div class="metric-row">
               <div class="metric-pill">all: <b>{all_count}</b></div>
               <div class="metric-pill">s: <b>{s_count}</b></div>
+              <div class="metric-pill">顏色: <b>{analysis['banana_color']}</b></div>
               <div class="metric-pill">黑斑值: <b>{analysis['black_spot_pct']:.2f}%</b></div>
               <div class="metric-pill">黑斑指數: <b>{analysis['black_spot_index']}</b></div>
               <div class="metric-pill">熟度: <b>{analysis['ripeness']}</b></div>

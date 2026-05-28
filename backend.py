@@ -1,4 +1,5 @@
 from pathlib import Path
+import colorsys
 
 from PIL import Image, ImageDraw
 from ultralytics import YOLO
@@ -12,6 +13,8 @@ S_CONF = 0.20
 LOW_SPOT_MAX = 5.0
 MID_SPOT_MAX = 15.0
 MAX_SPOT_BOX_AREA_RATIO = 0.25
+YELLOW_RATIO_MIN = 0.20
+GREEN_RATIO_MIN = 0.20
 
 model = YOLO(str(MODEL_PATH))
 
@@ -48,6 +51,16 @@ def _clip_box(box, outer_box):
     ]
 
 
+def _clip_box_to_image(box, image_size):
+    width, height = image_size
+    return [
+        max(0, min(width, int(box[0]))),
+        max(0, min(height, int(box[1]))),
+        max(0, min(width, int(box[2]))),
+        max(0, min(height, int(box[3]))),
+    ]
+
+
 def _union_box_area(boxes):
     x_edges = sorted({x for box in boxes for x in (box[0], box[2])})
     total = 0.0
@@ -72,6 +85,62 @@ def _union_box_area(boxes):
         total += (right - left) * sum(end - start for start, end in merged)
 
     return total
+
+
+def analyze_banana_color(image_path, detections):
+    all_box = next((d for d in detections if d["label"] == "all"), None)
+    if all_box is None:
+        return {
+            "banana_color": "不明",
+            "yellow_ratio": 0.0,
+            "green_ratio": 0.0,
+        }
+
+    with Image.open(image_path) as image:
+        image = image.convert("RGB")
+        crop_box = _clip_box_to_image(all_box["box"], image.size)
+        if crop_box[2] <= crop_box[0] or crop_box[3] <= crop_box[1]:
+            return {
+                "banana_color": "不明",
+                "yellow_ratio": 0.0,
+                "green_ratio": 0.0,
+            }
+
+        crop = image.crop(crop_box)
+        crop.thumbnail((220, 220))
+
+        total = max(1, crop.size[0] * crop.size[1])
+        yellow_count = 0
+        green_count = 0
+
+        for red, green, blue in crop.getdata():
+            hue, saturation, value = colorsys.rgb_to_hsv(
+                red / 255,
+                green / 255,
+                blue / 255,
+            )
+            hue_degrees = hue * 360
+
+            if 28 <= hue_degrees <= 70 and saturation >= 0.25 and value >= 0.35:
+                yellow_count += 1
+            elif 70 < hue_degrees <= 170 and saturation >= 0.20 and value >= 0.25:
+                green_count += 1
+
+    yellow_ratio = yellow_count / total
+    green_ratio = green_count / total
+
+    if yellow_ratio >= YELLOW_RATIO_MIN:
+        banana_color = "偏黃"
+    elif green_ratio >= GREEN_RATIO_MIN:
+        banana_color = "偏綠"
+    else:
+        banana_color = "不明"
+
+    return {
+        "banana_color": banana_color,
+        "yellow_ratio": round(yellow_ratio, 3),
+        "green_ratio": round(green_ratio, 3),
+    }
 
 
 def filter_yolo_detections(detections):
@@ -119,8 +188,15 @@ def calculate_black_spot_pct(detections):
     return round(min(spot_area / banana_area * 100, 100.0), 2)
 
 
-def classify_yolo_black_spot(black_spot_pct):
+def classify_yolo_black_spot(black_spot_pct, banana_color="不明"):
     if black_spot_pct < LOW_SPOT_MAX:
+        if banana_color == "偏黃":
+            return {
+                "black_spot_index": "低",
+                "standard": "YOLO <5% 且顏色偏黃 = 低黑斑但已轉黃",
+                "ripeness": "已轉黃或剛熟",
+                "sweetness_level": "甜度中等",
+            }
         return {
             "black_spot_index": "低",
             "standard": "YOLO <5% = 低",
@@ -142,16 +218,22 @@ def classify_yolo_black_spot(black_spot_pct):
     }
 
 
-def analyze_yolo_result(detections):
+def analyze_yolo_result(detections, image_path=None):
     black_spot_pct = calculate_black_spot_pct(detections)
     s_count = sum(1 for d in detections if d["label"] == "s")
     all_count = sum(1 for d in detections if d["label"] == "all")
-    result = classify_yolo_black_spot(black_spot_pct)
+    color_info = (
+        analyze_banana_color(image_path, detections)
+        if image_path is not None
+        else {"banana_color": "不明", "yellow_ratio": 0.0, "green_ratio": 0.0}
+    )
+    result = classify_yolo_black_spot(black_spot_pct, color_info["banana_color"])
     result.update({
         "black_spot_pct": black_spot_pct,
         "spot_count": s_count,
         "banana_count": all_count,
         "method": "YOLO",
+        **color_info,
     })
     return result
 
@@ -185,7 +267,7 @@ def predict_image(image_path, conf=DEFAULT_CONF):
 
 def predict_and_analyze(image_path, conf=DEFAULT_CONF):
     detections = predict_image(image_path, conf=conf)
-    analysis = analyze_yolo_result(detections)
+    analysis = analyze_yolo_result(detections, image_path=image_path)
     return detections, analysis
 
 
