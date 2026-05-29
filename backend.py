@@ -21,6 +21,7 @@ END_EXCLUDE_RATIO = 0.10
 MIN_COLOR_SPOT_AREA_RATIO = 0.00035
 MIN_SPOTS_FOR_COLOR_FALLBACK = 5
 MIN_YELLOW_RATIO_FOR_COLOR_FALLBACK = 0.12
+MAX_GREEN_RATIO_FOR_YELLOW_FALLBACK = 0.15
 
 model = YOLO(str(MODEL_PATH))
 
@@ -291,13 +292,19 @@ def should_apply_color_fallback(yolo_black_spot_pct, color_info, spot_count):
     if color_info["color_black_spot_pct"] < MID_SPOT_MAX:
         return False
 
-    if spot_count < MIN_SPOTS_FOR_COLOR_FALLBACK:
-        return False
-
     if color_info["yellow_ratio"] < MIN_YELLOW_RATIO_FOR_COLOR_FALLBACK:
         return False
 
-    return True
+    if spot_count >= MIN_SPOTS_FOR_COLOR_FALLBACK:
+        return True
+
+    if (
+        color_info["banana_color"] == "偏黃"
+        and color_info["green_ratio"] <= MAX_GREEN_RATIO_FOR_YELLOW_FALLBACK
+    ):
+        return True
+
+    return False
 
 
 def analyze_yolo_result(detections, image_path=None):
