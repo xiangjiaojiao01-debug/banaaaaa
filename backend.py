@@ -15,6 +15,8 @@ S_CONF = 0.20
 LOW_SPOT_MAX = 5.0
 MID_SPOT_MAX = 15.0
 MAX_SPOT_BOX_AREA_RATIO = 0.25
+LARGE_SPOT_BOX_AREA_RATIO = 0.03
+MIN_LARGE_SPOT_BROWN_RATIO = 0.08
 YELLOW_RATIO_MIN = 0.20
 GREEN_RATIO_MIN = 0.20
 END_EXCLUDE_RATIO = 0.10
@@ -139,6 +141,26 @@ def _body_brown_spot_mask(rgb_array):
     return kept_mask
 
 
+def _spot_box_has_color_evidence(image, spot_box, all_box):
+    banana_area = _box_area(all_box)
+    if banana_area <= 0:
+        return False
+
+    clipped_box = _clip_box(spot_box, all_box)
+    spot_area_ratio = _box_area(clipped_box) / banana_area
+    if spot_area_ratio < LARGE_SPOT_BOX_AREA_RATIO:
+        return True
+
+    x1, y1, x2, y2 = _clip_box_to_image(clipped_box, image.size)
+    if x2 <= x1 or y2 <= y1:
+        return False
+
+    crop = image.crop((x1, y1, x2, y2)).convert("RGB")
+    mask = _brown_spot_mask(np.array(crop))
+    brown_ratio = np.count_nonzero(mask) / max(1, mask.size)
+    return brown_ratio >= MIN_LARGE_SPOT_BROWN_RATIO
+
+
 def analyze_banana_color(image_path, detections):
     all_box = next((d for d in detections if d["label"] == "all"), None)
     if all_box is None:
@@ -209,7 +231,7 @@ def analyze_banana_color(image_path, detections):
     }
 
 
-def filter_yolo_detections(detections):
+def filter_yolo_detections(detections, image_path=None):
     all_detections = [d for d in detections if d["label"] == "all"]
     s_detections = [d for d in detections if d["label"] == "s" and d["confidence"] >= S_CONF]
 
@@ -230,6 +252,14 @@ def filter_yolo_detections(detections):
         if _inside(d["box"], all_box)
         and _box_area(_clip_box(d["box"], all_box)) / banana_area <= MAX_SPOT_BOX_AREA_RATIO
     ]
+
+    if image_path is not None:
+        with Image.open(image_path) as image:
+            image = image.convert("RGB")
+            s_detections = [
+                d for d in s_detections
+                if _spot_box_has_color_evidence(image, d["box"], all_box)
+            ]
 
     return best_all, s_detections
 
@@ -360,7 +390,7 @@ def predict_image(image_path, conf=DEFAULT_CONF):
             "source": "yolo",
         })
 
-    best_all, s_detections = filter_yolo_detections(raw_detections)
+    best_all, s_detections = filter_yolo_detections(raw_detections, image_path=image_path)
     if best_all is None:
         return s_detections
 
