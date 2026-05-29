@@ -6,8 +6,9 @@ import numpy as np
 from PIL import Image, ImageDraw
 from ultralytics import YOLO
 
+APP_DIR = Path(__file__).resolve().parent
 LOCAL_MODEL_PATH = Path(r"C:\Users\user\Desktop\yolo\banana_yolo\v19\weights\best.pt")
-MODEL_PATH = LOCAL_MODEL_PATH if LOCAL_MODEL_PATH.exists() else Path("best.pt")
+MODEL_PATH = LOCAL_MODEL_PATH if LOCAL_MODEL_PATH.exists() else APP_DIR / "best.pt"
 SOURCE_DIR = Path(r"C:\Users\user\Desktop\dataset(沒有甜度版)_cropped")
 OUTPUT_DIR = Path(r"C:\Users\user\Desktop\yolo\banana_predict_result")
 DEFAULT_CONF = 0.20
