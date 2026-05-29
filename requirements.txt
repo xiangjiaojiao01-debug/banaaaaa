@@ -1,4 +1,6 @@
 streamlit
+flask
+flask-cors
 ultralytics
 opencv-python-headless
 pillow
